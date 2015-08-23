@@ -1,0 +1,128 @@
+---
+title: "Predicting how well activity was performed"
+author: "Tan Lik Sin"
+date: "16 August 2015"
+output: html_document
+---
+
+## Overview
+This study focused on investigating how correct an activity was performed by the participant. Data collected in study "Qualitative Activity Recognition of Weight Lifting Exercises" was used. The dataset featured accelerometer readings of participants performing barbell lifts in one correct and 5 incorrect manner. This study attempted to predict the manner in which the barbell lifts were done using the training data. Preprocessing was first done to remove irrelevant information and columns with NA results. A training set and validation set was created. PCA was then applied to reduce the number of variables used for the prediction model. The prediction model used Random Tree method and was cross validated with the validation set, achieving about 98% accuracy. The prediction model was then tested on the 20 different test data.
+
+## Load and preprocess data
+
+```{r, echo=FALSE}
+knitr::opts_chunk$set(warning=FALSE, message=FALSE)
+```
+
+Step 1: Load required libraries
+```{r}
+library(caret)
+library(dplyr)
+library(rattle)
+```
+
+We download and read the training and test dataset. They can be downloaded from the following address:  
+Training dataset:  
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv  
+
+Testing dataset:  
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv  
+
+Step 2: Download training and test dataset
+```{r}
+training = read.csv("pml-training.csv", na.strings = c("", "NA"))
+testing = read.csv("pml-testing.csv", na.strings = c("", "NA"))
+```
+
+Step 3: Take a look at the dataset
+```{r}
+str(training)
+```
+
+Upon looking at the dataset, it is apparent that some variables such as raw_timestamp_part_1 will not help in the prediction of the manner in which an activity is performed. We need to remove such variables.  
+
+Step 4: Removing irrelevant variables
+```{r}
+#list of variables not useful in prediction of activity 
+drops = c("X","user_name","raw_timestamp_part_1","raw_timestamp_part_2","cvtd_timestamp","new_window","num_window")
+trainingdrop=training[,!(names(training) %in% drops)]
+testingdrop=testing[,!(names(testing) %in% drops)]
+```
+
+We also noted that there are many variables with only "NA" values (All other variables have no "NA" values). These variables will not be useful in our prediction model. We thus remove them.
+
+Step 5: Removing variables with only "NA" values
+```{r}
+#looking at the number of NAs in variable
+numberofNAs=data.frame(colSums(is.na(trainingdrop)))
+numberofNAs
+#removing columns with only NAs
+trainingnoNA=trainingdrop[,colSums(is.na(trainingdrop))==0]
+testingnoNA=testingdrop[,colSums(is.na(trainingdrop))==0]
+```
+
+We split the training data into training dataset (70% of all observation) and validation dataset (30%). The validation dataset will be used for cross validation.  
+
+Step 6: Splitting training data into training and validation dataset
+```{r}
+set.seed(123)
+inTrain = createDataPartition(trainingnoNA$classe, p = 0.70,list=FALSE)
+trainingset = trainingnoNA[inTrain,]
+validationset = trainingnoNA[-inTrain,]
+```
+
+With 53 variables remaining, we now look at how we can reduce the number of variables used for the prediciton model. We intend to remove variables with near zero covariates
+
+Step 6: Removing near zero covariates
+```{R}
+nzv=nearZeroVar(trainingset,saveMetrics=TRUE)
+nzv
+```
+
+Looking at nzv, there are no near zero covariates and no variables are removed.  
+We try to look at a weighted combination of predictors to help capture the majority of the information. We use the Principal Components Analysis (PCA) method to do that.
+
+Step 7: Reduce number of predictors using PCA
+```{r}
+preProc=preProcess(trainingset[,-53],method="pca",threshold=0.99)
+trainPC=predict(preProc,trainingset[,-53])
+validationPC=predict(preProc,validationset[,-53])
+```
+
+After preprocessing with PCA, we are left with 25 from 53 variables which accounts for 99% of the variability in the data set. 
+
+## Training a prediction model and cross-validation
+
+We chose to use a random forest method to predict the manner in which an activity is performed. trControl is used to reduce the processing time as opposed to using the default bootstrapping method (I made the mistake of bootstrapping...it cost me hours...). 
+
+Step 8: Generate random forest model
+```{r}
+modFit=train(trainingset$classe ~ ., data=trainPC, model="rf", trControl = trainControl(method = "cv", 
+    number = 4), importance = TRUE)
+```
+
+With the prediction model generated, we are ready to perform cross validation using the validation dataset we separated from the training set previously.
+
+Step 9: Cross validation with validation data set
+```{r}
+predval <- predict(modFit, newdata=validationPC)
+confusionMatrix(predval,validationset$classe)
+```
+
+We achieved an accuracy of approximately 98% using our prediction model on the validation data set. We expect the out of sample accuracy to be similar and the error rate should be approximately 2%. 
+
+## Predicted test results
+
+We now apply our prediction model to the test data set to predict the manner in which each activity is performed.  
+
+Step 10: Processing the test data and applying trained prediction model
+```{r}
+testPC=predict(preProc,testingnoNA[,-53])
+predval <- predict(modFit, newdata=testPC)
+predval
+```
+
+
+
+## Reference
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
